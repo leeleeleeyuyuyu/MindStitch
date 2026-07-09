@@ -80,12 +80,11 @@ let aiClient: GoogleGenAI | null = null;
 
 function getAIClient(): GoogleGenAI {
   if (!aiClient) {
-    const key = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-    if (!key) {
-      console.warn("GEMINI_API_KEY environment variable is not set. API calls will fail.");
-      throw new Error("API key is not set. Please configure your Gemini API key in the Secrets panel.");
-    }
-    aiClient = new GoogleGenAI({ apiKey: key });
+    // key 不再放前端;所有请求转发到 /api/gemini,由后端补上真实 key
+    aiClient = new GoogleGenAI({
+      apiKey: 'proxy-placeholder',
+      httpOptions: { baseUrl: window.location.origin + '/api/gemini' },
+    });
   }
   return aiClient;
 }
@@ -618,7 +617,7 @@ export default function App() {
     try {
       const ai = getAIClient();
       const responseStream = await ai.models.generateContentStream({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.5-flash",
         contents: textToAnalyze,
         config: {
           systemInstruction: `You are "MindStitch", an advanced thought enhancement AI.
@@ -817,7 +816,7 @@ Return the result strictly as a JSON object matching the schema. Always put the 
       const existingEdges = analysis?.analysis?.edges || [];
 
       const responseStream = await ai.models.generateContentStream({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.5-flash",
         contents: {
           parts: [
             {
@@ -953,7 +952,7 @@ Instructions:
     try {
       const ai = getAIClient();
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.5-flash",
         contents: `You are MindStitch, an advanced thought enhancement AI. The user is writing a text. Based on the following text, generate a single-line, high-context ghost suggestion to inspire their next sentence. Content should supplement what the user hasn't finished, or be a literary/creative continuation. Use a first-person or suggestive tone (e.g., "Perhaps we can try..."). Output ONLY the suggestion text, nothing else.\n\nText:\n${currentText}`
       });
       return response.text?.trim() || null;
