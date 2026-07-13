@@ -14,7 +14,8 @@ import {
   Connection,
   addEdge,
   useReactFlow,
-  ReactFlowProvider
+  ReactFlowProvider,
+  useStore
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { NodeData, EdgeData } from '../App';
@@ -57,6 +58,12 @@ const CustomNode = ({ data, id }: NodeProps<Node<NodeData>>) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(data.label);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const zoom = useStore((s) => s.transform[2]);
+  
+  // Semantic Zoom: Hide details if zoom is less than 0.6 and not a core/manual node
+  const isZoomedOut = zoom < 0.6;
+  const isCoreOrManual = source === 'Manual' || source === 'Merged' || data.type === 'core' || data.type === 'manual' || data.isConflict;
+  const shouldCollapse = isZoomedOut && !isCoreOrManual;
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -102,27 +109,43 @@ const CustomNode = ({ data, id }: NodeProps<Node<NodeData>>) => {
   let borderClass = 'border-zinc-700';
   let textClass = 'text-zinc-100';
   let shadowClass = 'shadow-lg';
-  let badge = '👤 Soul';
+  let badge = '👤 主观点';
   let animationClass = '';
   let inlineStyle: React.CSSProperties | undefined = undefined;
+
+  const [showGhost, setShowGhost] = useState(false);
+
+  // Reset showGhost if the hint is consumed or changed
+  useEffect(() => {
+    if (data.isHintConsumed) {
+      setShowGhost(false);
+    }
+  }, [data.isHintConsumed, data.hint]);
 
   if (data.isConflict) {
     bgClass = 'bg-amber-950/40';
     borderClass = 'border-amber-500 border-dashed';
     textClass = 'text-amber-100';
     shadowClass = 'shadow-[0_0_20px_rgba(245,158,11,0.5)]';
-    badge = '⚠️ Conflict';
+    badge = '⚠️ 逻辑冲突';
+  } else if (data.isOrphan) {
+    bgClass = 'bg-[#1a1a1a]/50';
+    borderClass = 'border-zinc-700 border-dashed';
+    textClass = 'text-zinc-500 line-through decoration-zinc-700';
+    shadowClass = 'shadow-none';
+    badge = '🔗 孤立节点';
+    animationClass = 'opacity-60 grayscale';
   } else if (source === 'Manual' || data.type === 'manual') {
     bgClass = 'bg-[#1a1a1a]';
     borderClass = 'border-zinc-500';
     textClass = 'text-zinc-300';
     shadowClass = 'shadow-[0_0_15px_rgba(113,113,122,0.3)]';
-    badge = '✍️ Manual';
+    badge = '✍️ 手写锚点';
   } else if (source === 'Merged') {
     bgClass = 'bg-[#1a1a1a]';
     borderClass = 'border-transparent';
     textClass = 'text-zinc-100';
-    badge = '🤝 Merged';
+    badge = '🤝 缝合节点';
     
     let rightColor = '#3b82f6';
     if (data.type === 'breadth') rightColor = '#a855f7';
@@ -134,7 +157,7 @@ const CustomNode = ({ data, id }: NodeProps<Node<NodeData>>) => {
       border: '2px solid transparent'
     };
   } else if (source === 'AI' || ['depth', 'breadth', 'challenge'].includes(data.type)) {
-    badge = '✨ AI';
+    badge = '✨ AI推演';
     if (data.type === 'depth') {
       borderClass = 'border-[#3B82F6] border-solid border-2';
       shadowClass = 'shadow-[0_0_15px_rgba(59,130,246,0.3)]';
@@ -153,7 +176,7 @@ const CustomNode = ({ data, id }: NodeProps<Node<NodeData>>) => {
     borderClass = 'border-indigo-500 border-dashed';
     textClass = 'text-indigo-100';
     shadowClass = 'shadow-[0_0_15px_rgba(99,102,241,0.3)]';
-    badge = '✏️ Sketch';
+    badge = '✏️ 草图识别';
   }
 
   const handleClick = (e: React.MouseEvent) => {
@@ -183,7 +206,7 @@ const CustomNode = ({ data, id }: NodeProps<Node<NodeData>>) => {
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
     >
-      {data.isConflict && (
+      {data.isConflict && !shouldCollapse && (
         <button 
           onClick={(e) => {
             e.stopPropagation();
@@ -191,55 +214,98 @@ const CustomNode = ({ data, id }: NodeProps<Node<NodeData>>) => {
             onResolveConflict?.(data.id, data.compromiseProposal || 'Merge nodes');
           }}
           className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-amber-500 p-1.5 rounded-full shadow-[0_0_15px_rgba(245,158,11,0.8)] text-white hover:bg-amber-400 transition-colors z-20"
-          title="Resolve Conflict"
+          title="解决逻辑冲突"
         >
           <GitMerge className="w-3 h-3" />
         </button>
       )}
-      <div className="absolute -top-2 -right-2 bg-zinc-800 text-[9px] font-mono px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-300 shadow-sm z-10">
-        {badge}
-      </div>
+      {!shouldCollapse && (
+        <div className="absolute -top-2 -right-2 bg-zinc-800 text-[9px] font-mono px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-300 shadow-sm z-10">
+          {badge}
+        </div>
+      )}
       <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-zinc-500" />
-      <div className="flex flex-col gap-1">
-        <span
-          className={clsx(
-            'text-[9px] font-mono uppercase tracking-wider',
-            'text-zinc-500'
-          )}
-        >
-          {data.type}
-        </span>
-        
-        {isEditing ? (
-          <textarea
-            ref={inputRef}
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onBlur={handleBlur}
-            onKeyDown={handleKeyDown}
-            className="w-full bg-black/40 text-white text-sm leading-tight p-1 rounded border border-zinc-600 focus:border-indigo-500 outline-none resize-none overflow-hidden"
-            rows={Math.max(2, editValue.split('\n').length)}
-          />
-        ) : (
-          <div className="flex flex-col gap-2">
-            <span className="text-sm leading-tight whitespace-pre-wrap">{data.label}</span>
+      
+      {shouldCollapse ? (
+        <div className="w-8 h-8 flex items-center justify-center m-auto relative">
+          <div className="w-4 h-4 rounded-full border-2 border-current flex items-center justify-center opacity-80" style={{ color: inlineStyle?.border ? 'transparent' : 'inherit' }}>
+            {data.type === 'depth' && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />}
+            {data.type === 'breadth' && <span className="w-1.5 h-1.5 bg-purple-500 rounded-full" />}
+            {data.type === 'challenge' && <span className="w-1.5 h-1.5 bg-red-500 rounded-full" />}
           </div>
-        )}
-        
-        {data.isNewRound && data.hint && !data.isHintConsumed && !isEditing && (
-          <button 
-            onClick={(e) => {
-              e.stopPropagation();
-              if ((data as any).onInjectHint) {
-                (data as any).onInjectHint(id);
-              }
-            }}
-            className="mt-2 text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-1 rounded border border-indigo-500/30 hover:bg-indigo-500/30 transition-colors flex items-center gap-1 w-fit"
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          <span
+            className={clsx(
+              'text-[9px] font-mono uppercase tracking-wider',
+              'text-zinc-500'
+            )}
           >
-            💡 提示
-          </button>
-        )}
-      </div>
+            {data.type}
+          </span>
+          
+          {isEditing ? (
+            <textarea
+              ref={inputRef}
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={handleBlur}
+              onKeyDown={handleKeyDown}
+              className="w-full bg-black/40 text-white text-sm leading-tight p-1 rounded border border-zinc-600 focus:border-indigo-500 outline-none resize-none overflow-hidden"
+              rows={Math.max(2, editValue.split('\n').length)}
+            />
+          ) : (
+            <div className="flex flex-col gap-2">
+              <span className="text-sm leading-tight whitespace-pre-wrap">{data.label}</span>
+            </div>
+          )}
+          
+          {/* Render the ghost suggestion preview and accept controls */}
+          {showGhost && data.hint && !data.isHintConsumed && (
+            <div className="mt-2 pt-2 border-t border-dashed border-zinc-800/80 flex flex-col gap-2">
+              <span className="text-xs text-zinc-400 italic leading-snug whitespace-pre-wrap">
+                {data.hint}
+              </span>
+              <div className="flex items-center gap-1.5 self-end">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowGhost(false);
+                  }}
+                  className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded transition-colors flex items-center gap-0.5"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if ((data as any).onInjectHint) {
+                      (data as any).onInjectHint(id);
+                    }
+                    setShowGhost(false);
+                  }}
+                  className="text-[10px] bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-200 px-2 py-0.5 rounded border border-indigo-500/20 transition-colors flex items-center gap-0.5 font-medium"
+                >
+                  ✔ 采纳
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!(data as any).isInitialNode && (data as any).isIdle && data.isNewRound && data.hint && !data.isHintConsumed && !isEditing && !showGhost && (
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowGhost(true);
+              }}
+              className="mt-2 text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-1 rounded border border-indigo-500/30 hover:bg-indigo-500/30 transition-colors flex items-center gap-1 w-fit"
+            >
+              💡 提示
+            </button>
+          )}
+        </div>
+      )}
       <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-zinc-500" />
     </motion.div>
   );
@@ -252,6 +318,7 @@ const nodeTypes = {
 interface LogicMapProps {
   nodes?: NodeData[];
   edges?: EdgeData[];
+  isIdle?: boolean;
   onEditNode?: (id: string, newLabel: string) => void;
   onAddNode?: (position: { x: number, y: number }) => void;
   onAddEdge?: (source: string, target: string) => void;
@@ -263,7 +330,7 @@ interface LogicMapProps {
   onDeleteNode?: (nodeId: string) => void;
 }
 
-function LogicMapInner({ nodes = [], edges = [], onEditNode, onAddNode, onAddEdge, onUpdateNodePosition, onResolveConflict, onManualEdit, onInteractionStart, onInjectHint, onDeleteNode }: LogicMapProps) {
+function LogicMapInner({ nodes = [], edges = [], isIdle = false, onEditNode, onAddNode, onAddEdge, onUpdateNodePosition, onResolveConflict, onManualEdit, onInteractionStart, onInjectHint, onDeleteNode }: LogicMapProps) {
   const { screenToFlowPosition, fitView } = useReactFlow();
   // Simple auto-layout logic for nodes since Gemini might not return positions
   const initialNodes = useMemo(() => {
@@ -274,15 +341,23 @@ function LogicMapInner({ nodes = [], edges = [], onEditNode, onAddNode, onAddEdg
         { id: 'bg3', type: 'custom', position: { x: 250, y: 450 }, data: { id: 'bg3', label: '...', type: 'fact', isGap: false, source: 'AI', onResolveConflict, onEditNode, onInteractionStart, onInjectHint } },
       ];
     }
-    const mappedNodes = nodes.map((node, index) => ({
-      id: node.id,
-      type: 'custom',
-      position: node.position || { x: 0, y: 0 },
-      data: { ...node, onResolveConflict, onEditNode, onInteractionStart, onInjectHint },
-    }));
+    const mappedNodes = nodes.map((node, index) => {
+      const hasIncomingEdges = edges.some(edge => edge.target === node.id);
+      const isInitialNode = !hasIncomingEdges || 
+                            node.type === 'core' || 
+                            node.type === 'manual' || 
+                            node.source === 'Manual' || 
+                            node.source === 'Text';
+      return {
+        id: node.id,
+        type: 'custom',
+        position: node.position || { x: 0, y: 0 },
+        data: { ...node, isInitialNode, isIdle, onResolveConflict, onEditNode, onInteractionStart, onInjectHint },
+      };
+    });
     
     return getLayoutedElements(mappedNodes, edges, 'LR');
-  }, [nodes, edges, onResolveConflict, onEditNode, onInteractionStart, onInjectHint]);
+  }, [nodes, edges, isIdle, onResolveConflict, onEditNode, onInteractionStart, onInjectHint]);
 
   const initialEdges = useMemo(() => {
     if (edges.length === 0 && nodes.length === 0) {

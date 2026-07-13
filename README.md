@@ -1,6 +1,20 @@
-在生成式 AI 普及的时代，人类正面临前所未有的“认知卸载”危机——我们越来越习惯于让 AI 替我们思考、替我们得出结论。
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
+</div>
 
-MindStitch 的诞生正是为了对抗这种趋势。我坚信，AI 不应是思想的代工者，而应是思想的磨刀石。MindStitch 旨在保护人类的“灵魂锚点”（Soul Anchor），通过苏格拉底式的反问与视觉化的逻辑推演，强迫你直面思维的盲区，最终将碎片化的灵感“缝合”（Stitch）成坚不可摧的个人思想资产。
+# Run and deploy your AI Studio app
 
-这里是李昱。
-真心感谢你看到这里！
+This contains everything you need to run your app locally.
+
+View your app in AI Studio: https://ai.studio/apps/7a9ad9e9-cd07-4fad-9007-c5a0b26a2bed
+
+## Run Locally
+
+**Prerequisites:**  Node.js
+
+
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`

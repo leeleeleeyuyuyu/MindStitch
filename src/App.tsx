@@ -8,7 +8,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Editor } from './components/Editor';
 import { LogicMap } from './components/LogicMap';
 import { ImageUploader } from './components/ImageUploader';
-import { BrainCircuit, Upload, Loader2, Sparkles, X, Clock, ArrowLeft, ShieldAlert, Download, Anchor, GitMerge, Zap } from 'lucide-react';
+import { BrainCircuit, Upload, Loader2, Sparkles, X, Clock, ArrowLeft, ShieldAlert, Download, Anchor, GitMerge, Zap, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleGenAI, Type } from '@google/genai';
 import { clsx } from 'clsx';
@@ -80,11 +80,12 @@ let aiClient: GoogleGenAI | null = null;
 
 function getAIClient(): GoogleGenAI {
   if (!aiClient) {
-    // key 不再放前端;所有请求转发到 /api/gemini,由后端补上真实 key
-    aiClient = new GoogleGenAI({
-      apiKey: 'proxy-placeholder',
-      httpOptions: { baseUrl: window.location.origin + '/api/gemini' },
-    });
+    const key = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    if (!key) {
+      console.warn("GEMINI_API_KEY environment variable is not set. API calls will fail.");
+      throw new Error("API key is not set. Please configure your Gemini API key in the Secrets panel.");
+    }
+    aiClient = new GoogleGenAI({ apiKey: key });
   }
   return aiClient;
 }
@@ -272,6 +273,8 @@ export default function App() {
   const [exportData, setExportData] = useState<{ summary: string; actionList: string[] } | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [snapshotImage, setSnapshotImage] = useState<string | null>(null);
+  const [isIdle, setIsIdle] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
   const adoptedGhostTexts = useRef<string[]>([]);
 
   useEffect(() => {
@@ -291,6 +294,7 @@ export default function App() {
     } else if (!showExportModal) {
       setSnapshotImage(null);
       setExportData(null);
+      setCopySuccess(false);
     }
   }, [showExportModal]);
 
@@ -314,7 +318,7 @@ export default function App() {
       }`;
       
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3-flash-preview",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -560,6 +564,7 @@ export default function App() {
 
   const handleAnalyzeText = async (overrideText?: string | React.MouseEvent, mergeManualEdits: boolean = false) => {
     setIsWorkspaceMode(true);
+    setIsIdle(false);
     const textToAnalyze = typeof overrideText === 'string' ? overrideText : text;
     
     if (!textToAnalyze.trim()) {
@@ -617,7 +622,7 @@ export default function App() {
     try {
       const ai = getAIClient();
       const responseStream = await ai.models.generateContentStream({
-        model: "gemini-2.5-flash",
+        model: "gemini-3-flash-preview",
         contents: textToAnalyze,
         config: {
           systemInstruction: `You are "MindStitch", an advanced thought enhancement AI.
@@ -635,7 +640,7 @@ Step 2: If low density, set entropy to 'low' and set ghostSuggestion to a Mad-li
 Step 3: If high density, extract and Classify (Core points, known facts, fuzzy intents).
 Step 4: Logic Gap Diagnosis (Assess completeness. Mark missing links as [Logic Gap]).
 Step 5: Generate 3 structured Socratic Pillars (Depth, Breadth, Challenge) to guide the user's next steps.
-Step 6: Generate a single-line, high-context ghost suggestion (Linguistic Ghost Text) to inspire the user's next sentence. This is "Intent Continuation". Content should supplement what the user hasn't finished, or be a literary/creative continuation. Use a first-person or suggestive tone (e.g., "Perhaps we can try..."). This MUST be aligned with one of the Socratic Pillars. Set ghostSuggestionType to 'depth', 'breadth', or 'challenge' accordingly.
+Step 6: Generate a single-line, high-context ghost suggestion (Linguistic Ghost Text) to inspire the user's next sentence. This is "Intent Continuation". It MUST NOT start with repetitive/cliché prefixes such as "或许", "也许", "或许我们可以", "试着", "我们不妨", "或许能够". It must be a natural, smooth, and grammatically/stylistically seamless continuation of the user's current text. Ensure that even if the user repeatedly accepts these suggestions sequentially without writing custom content in between, the accumulated text forms a highly coherent, logically sound, and naturally transitioning paragraph/article with elegant prose. Align this suggestion with one of the Socratic Pillars and set ghostSuggestionType accordingly.
 Step 7: Generate a Logic Map (nodes and edges). Nodes MUST use types 'depth', 'breadth', or 'challenge' to represent their nature. Use 'manual' for user's explicit points. For each AI-generated node, provide a "hint" (Structural Hint). This is a "Logic Breakthrough". Content MUST be hardcore strategies, technical paths, or specific factual support answering the node's question. Use an objective, structured strategy (e.g., list 3 specific technical tradeoffs).
 
 CRITICAL INSTRUCTIONS FOR "Merged" NODES:
@@ -807,6 +812,7 @@ Return the result strictly as a JSON object matching the schema. Always put the 
 
   const handleImageUpload = async (base64Image: string, mimeType: string) => {
     setIsAnalyzing(true);
+    setIsIdle(false);
     setShowUploader(false);
     setSketchThumbnail(`data:${mimeType || 'image/jpeg'};base64,${base64Image.split(',')[1]}`);
     setCurrentLog("Initializing vision models...");
@@ -816,7 +822,7 @@ Return the result strictly as a JSON object matching the schema. Always put the 
       const existingEdges = analysis?.analysis?.edges || [];
 
       const responseStream = await ai.models.generateContentStream({
-        model: "gemini-2.5-flash",
+        model: "gemini-3-flash-preview",
         contents: {
           parts: [
             {
@@ -952,8 +958,8 @@ Instructions:
     try {
       const ai = getAIClient();
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `You are MindStitch, an advanced thought enhancement AI. The user is writing a text. Based on the following text, generate a single-line, high-context ghost suggestion to inspire their next sentence. Content should supplement what the user hasn't finished, or be a literary/creative continuation. Use a first-person or suggestive tone (e.g., "Perhaps we can try..."). Output ONLY the suggestion text, nothing else.\n\nText:\n${currentText}`
+        model: "gemini-3-flash-preview",
+        contents: `You are MindStitch, an advanced thought enhancement AI. The user is writing a text. Based on the following text, generate a single-line, high-context ghost suggestion to inspire their next sentence. Content should be a natural, smooth, and grammatically/stylistically seamless continuation of the user's current text. It MUST NOT start with repetitive/cliché prefixes such as "Perhaps", "Maybe", "或许", "也许", "我们可以", "不妨". It must blend in perfectly. If the user keeps accepting these suggestions sequentially, the overall text should form a highly coherent, logically sound, and naturally flowing piece of writing with elegant prose and professional transitions. Output ONLY the suggestion text, nothing else.\n\nText:\n${currentText}`
       });
       return response.text?.trim() || null;
     } catch (e) {
@@ -976,7 +982,7 @@ Instructions:
             <button 
               onClick={handleBackToStart}
               className="p-2 mr-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors shrink-0"
-              title="Back to Start"
+              title="返回开始"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
@@ -985,9 +991,6 @@ Instructions:
             <GitMerge className="w-5 h-5 text-[#E2E8F0]" strokeWidth={1.5} />
           </div>
           <h1 className="text-lg font-medium tracking-tight text-zinc-100 shrink-0">MindStitch</h1>
-          <span className="px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider bg-zinc-800 text-zinc-400 rounded-full ml-2 shrink-0">
-            v2.0.26
-          </span>
         </div>
 
         {/* Undo/Redo Controls */}
@@ -997,7 +1000,7 @@ Instructions:
               onClick={handleUndo}
               disabled={historyIndex <= 0}
               className="p-1.5 text-zinc-400 hover:text-zinc-100 disabled:opacity-30 disabled:hover:text-zinc-400 hover:bg-zinc-800 rounded transition-colors shrink-0"
-              title="Undo (Stitch state)"
+              title="撤销思维缝合状态"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
             </button>
@@ -1006,7 +1009,7 @@ Instructions:
               onClick={handleRedo}
               disabled={historyIndex >= historyStack.length - 1}
               className="p-1.5 text-zinc-400 hover:text-zinc-100 disabled:opacity-30 disabled:hover:text-zinc-400 hover:bg-zinc-800 rounded transition-colors shrink-0"
-              title="Redo (Stitch state)"
+              title="重做思维缝合状态"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
             </button>
@@ -1022,21 +1025,21 @@ Instructions:
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors rounded-lg border border-zinc-800/50 hover:bg-zinc-800/50 shrink-0"
           >
             <Upload className="w-4 h-4" />
-            <span>Upload Sketch</span>
+            <span>上传手绘草图</span>
           </button>
           <button
             onClick={() => setShowModeSelector(true)}
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors rounded-lg hover:bg-zinc-800/50 border border-zinc-800/50 shrink-0"
           >
             {appMode === 'brainstorm' ? <Zap className="w-4 h-4 text-[#E2E8F0]" strokeWidth={1.5} /> : <BrainCircuit className="w-4 h-4 text-[#E2E8F0]" strokeWidth={1.5} />}
-            <span>{appMode === 'brainstorm' ? 'Brainstorm' : 'Pro'}</span>
+            <span>{appMode === 'brainstorm' ? '头脑风暴模式' : '深度推演模式'}</span>
           </button>
           <button
             onClick={() => setShowExportModal(true)}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors rounded-lg border border-zinc-800/50 hover:bg-zinc-800/50 shrink-0"
           >
             <Download className="w-4 h-4" />
-            <span>Crystallize</span>
+            <span>思维结晶</span>
           </button>
           <div className="relative flex items-center gap-2 overflow-visible shrink-0 ml-6">
             <button
@@ -1051,7 +1054,7 @@ Instructions:
             >
               {isHighDensity && <SparklesEffect />}
               {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin relative z-10" /> : <Sparkles className="w-4 h-4 relative z-10" />}
-              <span className="relative z-10">Stitch Thoughts</span>
+              <span className="relative z-10">思维缝合</span>
             </button>
           </div>
         </div>
@@ -1083,6 +1086,8 @@ Instructions:
             isSoulAnchorEnabled={isSoulAnchorEnabled}
             setIsSoulAnchorEnabled={setIsSoulAnchorEnabled}
             protectedFlaw={protectedFlaw}
+            onIdleChange={setIsIdle}
+            isAnalyzing={isAnalyzing}
           />
         </div>
 
@@ -1106,6 +1111,7 @@ Instructions:
           <LogicMap 
             nodes={memoizedNodes} 
             edges={memoizedEdges} 
+            isIdle={isIdle}
             onEditNode={handleEditNode} 
             onAddNode={handleAddNode}
             onDeleteNode={handleDeleteNode}
@@ -1117,6 +1123,12 @@ Instructions:
             onInjectHint={(nodeId) => {
               const node = memoizedNodes.find(n => n.id === nodeId);
               if (node) {
+                if (node.hint) {
+                  setText(prev => {
+                    const separator = prev === '' || prev.endsWith('\n') ? '' : '\n';
+                    return prev + separator + node.hint;
+                  });
+                }
                 setAnalysis(prev => {
                   if (!prev) return prev;
                   const newNodes = prev.analysis?.nodes?.map(n => {
@@ -1160,7 +1172,7 @@ Instructions:
           {sketchThumbnail && (
             <div className="absolute bottom-6 right-6 z-20 bg-zinc-900/90 p-3 rounded-xl border border-zinc-800 shadow-2xl backdrop-blur-md">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Sketch Reference</span>
+                <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">手绘草图参考</span>
                 <button onClick={() => setSketchThumbnail(null)} className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors">
                   <X className="w-3 h-3" />
                 </button>
@@ -1209,9 +1221,9 @@ Instructions:
                     )}
                   </AnimatePresence>
                 </div>
-                <h2 className="text-3xl font-medium text-zinc-100 tracking-tight mb-3">Choose Your Mindset</h2>
+                <h2 className="text-3xl font-medium text-zinc-100 tracking-tight mb-3">选择您的思维模式</h2>
                 <p className="text-zinc-400 text-sm max-w-md mx-auto">
-                  Select how MindStitch should interact with your thoughts. You can change this later.
+                  选择 MindStitch 如何与您的思维碰撞。您稍后可以随时切换。
                 </p>
               </div>
               
@@ -1229,9 +1241,9 @@ Instructions:
                   <div className="w-12 h-12 rounded-full bg-indigo-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                     <Zap className="w-6 h-6 text-[#E2E8F0]" strokeWidth={1.5} />
                   </div>
-                  <h3 className="text-lg font-medium text-zinc-100 mb-2">Brainstorm Mode</h3>
+                  <h3 className="text-lg font-medium text-zinc-100 mb-2">头脑风暴模式</h3>
                   <p className="text-xs text-zinc-400 text-center leading-relaxed">
-                    Focus on intuition and simple language. Technical terms are converted into intuitive questions.
+                    聚焦于直觉与通俗表达。AI 会将复杂的专业术语转化为苏格拉底式的直觉问题。
                   </p>
                 </button>
                 
@@ -1248,9 +1260,9 @@ Instructions:
                   <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                     <BrainCircuit className="w-6 h-6 text-[#E2E8F0]" strokeWidth={1.5} />
                   </div>
-                  <h3 className="text-lg font-medium text-zinc-100 mb-2">Pro Mode</h3>
+                  <h3 className="text-lg font-medium text-zinc-100 mb-2">深度推演模式</h3>
                   <p className="text-xs text-zinc-400 text-center leading-relaxed">
-                    Focus on frameworks, technical accuracy, and precise terminology for deep architectural thinking.
+                    专注于严谨框架、技术精确度与专业术语，助力深度系统架构与逻辑思考。
                   </p>
                 </button>
               </div>
@@ -1266,18 +1278,18 @@ Instructions:
               className="relative w-full max-w-lg p-6 bg-zinc-900 border border-red-500/30 rounded-2xl shadow-[0_0_40px_rgba(239,68,68,0.15)]"
             >
               <h2 className="text-lg font-medium text-red-400 mb-4 flex items-center gap-2">
-                <ShieldAlert className="w-5 h-5" /> Logic Gap Detected
+                <ShieldAlert className="w-5 h-5" /> 检测到逻辑漏洞
               </h2>
               <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-6">
                 <p className="text-sm text-zinc-300 leading-relaxed mb-2">
-                  <span className="font-semibold text-red-300">Error:</span> {analysis.analysis.criticalError.error}
+                  <span className="font-semibold text-red-300">逻辑冲突:</span> {analysis.analysis.criticalError.error}
                 </p>
                 <p className="text-sm text-zinc-300 leading-relaxed">
-                  <span className="font-semibold text-emerald-300">Proposed Fix:</span> {analysis.analysis.criticalError.fix}
+                  <span className="font-semibold text-emerald-300">推荐修复:</span> {analysis.analysis.criticalError.fix}
                 </p>
               </div>
               <p className="text-xs text-zinc-500 mb-6">
-                Your text is protected by the Soul Anchor. Would you like to apply this fix or keep your original thought?
+                您的原文已启用主观点保护模式。您是否希望应用此修复方案，还是坚持您当前的原创思考？
               </p>
               <div className="flex justify-end gap-3">
                 <button
@@ -1310,7 +1322,7 @@ Instructions:
               <div className="p-6 border-b border-zinc-800 flex justify-between items-center sticky top-0 bg-[#111] z-10">
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
                   <Download className="w-5 h-5" />
-                  Mind Snapshot
+                  思维快照与结晶
                 </h2>
                 <button onClick={() => setShowExportModal(false)} className="text-zinc-400 hover:text-white">
                   <X className="w-5 h-5" />
@@ -1321,29 +1333,29 @@ Instructions:
                 {isExporting ? (
                   <div className="flex items-center justify-center py-12 text-zinc-400 gap-3">
                     <Loader2 className="w-6 h-6 animate-spin" />
-                    Crystallizing thoughts...
+                    思维结晶中，请稍候...
                   </div>
                 ) : exportData ? (
                   <>
                     <section>
-                      <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-wider mb-3">Executive Summary</h3>
+                      <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-wider mb-3">核心逻辑摘要 (Executive Summary)</h3>
                       <p className="text-zinc-200 leading-relaxed">{exportData.summary}</p>
                     </section>
                     
                     <section>
-                      <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-wider mb-3">The Raw Record</h3>
+                      <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-wider mb-3">原文与拓扑记录</h3>
                       <div className="grid grid-cols-2 gap-6">
                         <div className="bg-[#050505] border border-zinc-800 rounded-lg p-4">
-                          <h4 className="text-xs font-semibold text-zinc-600 mb-2">SOUL ANCHOR</h4>
+                          <h4 className="text-xs font-semibold text-zinc-600 mb-2">主观点保护文本 (SOUL ANCHOR)</h4>
                           <div className="text-sm text-zinc-300 whitespace-pre-wrap font-serif">{text}</div>
                         </div>
                         <div className="bg-[#050505] border border-zinc-800 rounded-lg p-4 flex flex-col">
-                          <h4 className="text-xs font-semibold text-zinc-600 mb-2">TOPOLOGY BLUEPRINT</h4>
+                          <h4 className="text-xs font-semibold text-zinc-600 mb-2">思维空间拓扑蓝图</h4>
                           <div className="relative flex-1 min-h-[200px] rounded overflow-hidden border border-zinc-800/50">
                             {snapshotImage ? (
-                              <img src={snapshotImage} alt="Topology" className="w-full h-full object-contain" />
+                                <img src={snapshotImage} alt="Topology" className="w-full h-full object-contain" />
                             ) : (
-                              <div className="absolute inset-0 flex items-center justify-center text-zinc-500 text-xs">Capturing blueprint...</div>
+                              <div className="absolute inset-0 flex items-center justify-center text-zinc-500 text-xs">正在捕获思维蓝图...</div>
                             )}
                           </div>
                         </div>
@@ -1351,7 +1363,7 @@ Instructions:
                     </section>
                     
                     <section>
-                      <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-wider mb-3">Action List</h3>
+                      <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-wider mb-3">后续行动与执行建议</h3>
                       <ul className="space-y-2">
                         {exportData.actionList.map((action, i) => (
                           <li key={i} className="flex items-start gap-2 text-zinc-300 text-sm">
@@ -1365,17 +1377,78 @@ Instructions:
                 ) : null}
               </div>
               
-              <div className="p-6 border-t border-zinc-800 flex justify-end gap-3 sticky bottom-0 bg-[#111] z-10">
-                <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white transition-colors">
-                  Cancel
-                </button>
-                <button 
-                  disabled={isExporting || !exportData}
-                  onClick={downloadSnapshot}
-                  className="px-4 py-2 bg-white text-black rounded-md text-sm font-medium hover:bg-zinc-200 transition-colors disabled:opacity-50"
-                >
-                  Confirm Export
-                </button>
+              <div className="p-6 border-t border-zinc-800 flex justify-between items-center sticky bottom-0 bg-[#111] z-10">
+                <div className="flex gap-2">
+                  <button 
+                    disabled={isExporting || !exportData}
+                    onClick={() => {
+                      if (!exportData) return;
+                      const mdText = `# 思维结晶快照 - ${new Date().toLocaleString()}
+
+## 核心逻辑摘要 (Executive Summary)
+${exportData.summary}
+
+## 原文记录 (SOUL ANCHOR)
+\`\`\`text
+${text}
+\`\`\`
+
+## 后续行动与执行建议
+${exportData.actionList.map((action: string, i: number) => `${i + 1}. ${action}`).join('\n')}
+`;
+                      navigator.clipboard.writeText(mdText);
+                      setCopySuccess(true);
+                      setTimeout(() => setCopySuccess(false), 2000);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-md text-xs font-medium transition-colors disabled:opacity-50"
+                  >
+                    {copySuccess ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copySuccess ? '已复制 Markdown' : '复制 Markdown'}
+                  </button>
+                  <button 
+                    disabled={isExporting || !exportData}
+                    onClick={() => {
+                      if (!exportData) return;
+                      const mdText = `# 思维结晶快照 - ${new Date().toLocaleString()}
+
+## 核心逻辑摘要 (Executive Summary)
+${exportData.summary}
+
+## 原文记录 (SOUL ANCHOR)
+\`\`\`text
+${text}
+\`\`\`
+
+## 后续行动与执行建议
+${exportData.actionList.map((action: string, i: number) => `${i + 1}. ${action}`).join('\n')}
+`;
+                      const blob = new Blob([mdText], { type: 'text/markdown;charset=utf-8;' });
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.setAttribute('download', `mindstitch-crystallization-${Date.now()}.md`);
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-md text-xs font-medium transition-colors disabled:opacity-50"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    下载 .md 文本
+                  </button>
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white transition-colors">
+                    取消
+                  </button>
+                  <button 
+                    disabled={isExporting || !exportData}
+                    onClick={downloadSnapshot}
+                    className="px-4 py-2 bg-white text-black rounded-md text-sm font-medium hover:bg-zinc-200 transition-colors disabled:opacity-50"
+                  >
+                    导出拓扑图 (JPG)
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1394,10 +1467,10 @@ Instructions:
               className="relative w-full max-w-lg p-6 bg-zinc-900 border border-indigo-500/30 rounded-2xl shadow-[0_0_40px_rgba(99,102,241,0.15)]"
             >
               <h2 className="text-lg font-medium text-indigo-400 mb-4 flex items-center gap-2">
-                <span className="p-1.5 bg-indigo-500/10 rounded-md">🔄</span> Merge Manual Edits?
+                <span className="p-1.5 bg-indigo-500/10 rounded-md">🔄</span> 是否合并手动修改？
               </h2>
               <p className="text-sm text-zinc-300 leading-relaxed mb-6">
-                Detected manual edits in Logic Map. Merge them with the new text changes?
+                检测到您曾在逻辑图中对节点内容进行过手动编辑。是否需要将这些编辑与最新的文本改动一同合并并缝合？
               </p>
               <div className="flex justify-end gap-3">
                 <button
@@ -1408,7 +1481,7 @@ Instructions:
                   }}
                   className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors"
                 >
-                  No: Discard manual edits
+                  否：放弃手动修改
                 </button>
                 <button
                   onClick={() => {
@@ -1417,7 +1490,7 @@ Instructions:
                   }}
                   className="px-4 py-2 text-sm font-medium text-white bg-indigo-500 hover:bg-indigo-400 rounded-lg transition-colors shadow-lg shadow-indigo-500/25"
                 >
-                  Yes: Sync both
+                  是：合并并同步二者
                 </button>
               </div>
             </motion.div>

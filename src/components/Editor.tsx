@@ -17,6 +17,8 @@ interface EditorProps {
   isSoulAnchorEnabled?: boolean;
   setIsSoulAnchorEnabled?: (enabled: boolean) => void;
   protectedFlaw?: string | null;
+  onIdleChange?: (idle: boolean) => void;
+  isAnalyzing?: boolean;
 }
 
 function InspirationCard({ icon, title, content, onClick }: { icon: React.ReactNode, title: string, content: string, onClick: () => void }) {
@@ -50,7 +52,9 @@ export function Editor({
   isWorkspaceMode = false,
   isSoulAnchorEnabled = false,
   setIsSoulAnchorEnabled,
-  protectedFlaw
+  protectedFlaw,
+  onIdleChange,
+  isAnalyzing = false
 }: EditorProps) {
   const [isIdle, setIsIdle] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -59,6 +63,10 @@ export function Editor({
   const mirrorRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const idleTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  
+  useEffect(() => {
+    onIdleChange?.(isIdle);
+  }, [isIdle, onIdleChange]);
   
   const resetInquiryState = () => {
     setGhostText(null);
@@ -74,8 +82,9 @@ export function Editor({
   }, [text]);
 
   useEffect(() => {
-    if (!isWorkspaceMode || !text.trim() || isGenerating || ghostText) {
-      setIsIdle(false);
+    setIsIdle(false);
+    
+    if (!isWorkspaceMode || !text.trim() || isGenerating || ghostText || isAnalyzing) {
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current);
         idleTimerRef.current = null;
@@ -97,7 +106,7 @@ export function Editor({
         idleTimerRef.current = null;
       }
     };
-  }, [text, isWorkspaceMode, isGenerating, ghostText]);
+  }, [text, isWorkspaceMode, isGenerating, ghostText, isAnalyzing]);
 
   const handleSparkleClick = async () => {
     if (!onGenerateGhostText) return;
@@ -143,6 +152,8 @@ export function Editor({
     const suggestion = ghostText;
     const space = (text.endsWith(' ') || text.endsWith('\n') || text === '') ? '' : ' ';
     const newText = text + space + suggestion;
+    setIsIdle(false);
+    onIdleChange?.(false);
     setText(newText);
     resetInquiryState();
     if (onGhostAdopted) {
@@ -207,16 +218,16 @@ export function Editor({
                 ? "bg-[#E2E8F0] text-zinc-900 shadow-[0_0_15px_rgba(226,232,240,0.4)]" 
                 : "bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 border border-zinc-700/50"
             )}
-            title={isSoulAnchorEnabled ? "Soul Anchor Enabled: Your text is protected from AI alteration" : "Enable Soul Anchor to protect your text"}
+            title={isSoulAnchorEnabled ? "主观点保护已启用：您的原文已被锁定，AI将无法擅自修改或重写它。" : "启用主观点保护以锁定您的原文，防止被 AI 擅自重写"}
           >
             <Anchor className={clsx("w-4 h-4", isSoulAnchorEnabled ? "text-zinc-900" : "text-zinc-400")} />
-            {isSoulAnchorEnabled ? "Soul Anchor ON" : "Soul Anchor OFF"}
+            {isSoulAnchorEnabled ? "主观点保护已开启" : "主观点保护已关闭"}
           </button>
           
           {protectedFlaw && (
             <div className="flex items-center gap-1.5 px-2 py-1 bg-red-500/10 border border-red-500/20 rounded text-[10px] font-medium text-red-400">
               <ShieldAlert className="w-3 h-3" />
-              <span>Logic Flaw Protected</span>
+              <span>逻辑漏洞保护中</span>
             </div>
           )}
         </div>
@@ -270,11 +281,15 @@ export function Editor({
               <textarea
                 ref={textareaRef}
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => {
+                  setIsIdle(false);
+                  onIdleChange?.(false);
+                  setText(e.target.value);
+                }}
                 onSelect={handleSelect}
                 onScroll={handleScroll}
                 onKeyDown={handleKeyDown}
-                placeholder={(!isWorkspaceMode || !text.trim()) ? "试着补全：I want to [Action] for [Audience] using [Method]." : "Start typing your thoughts..."}
+                placeholder={(!isWorkspaceMode || !text.trim()) ? "试着开始您的思考，例如：我想对【目标人群】用【特定方法】解决【某项痛点】..." : "开始输入您的思考碎片..."}
                 className={clsx(
                   "w-full h-full flex-1 bg-transparent text-zinc-100 font-sans text-lg leading-relaxed resize-none outline-none transition-all z-10",
                   (!isWorkspaceMode || !text.trim()) ? "absolute inset-0 bg-zinc-900/20 border border-zinc-800/50 rounded-2xl p-6 focus:border-indigo-500/50 focus:bg-zinc-900/40 placeholder:text-zinc-600" : "placeholder:text-zinc-700"
@@ -299,7 +314,7 @@ export function Editor({
                       <button 
                         onClick={handleSparkleClick}
                         className={`absolute left-1 top-1/2 -translate-y-1/2 ${ghostIconColor} hover:opacity-80 transition-colors z-10 animate-pulse`}
-                        title="Click to generate suggestion"
+                        title="点击生成灵感建议"
                       >
                         <Sparkles className="w-4 h-4" />
                       </button>
@@ -312,7 +327,7 @@ export function Editor({
                     {ghostText && (
                       <span className={`${ghostColorClass} ml-1 pl-2 border-l-2 ${ghostBorderClass} cursor-pointer`} onClick={acceptGhost}>
                         {ghostText}
-                        <span className={`text-[10px] ml-2 ${ghostColorClass} border ${ghostBorderClass} px-1 rounded ${ghostBgClass}`}>Tab to accept</span>
+                        <span className={`text-[10px] ml-2 ${ghostColorClass} border ${ghostBorderClass} px-1 rounded ${ghostBgClass}`}>按 Tab 键采纳</span>
                       </span>
                     )}
                   </span>
@@ -328,7 +343,7 @@ export function Editor({
             >
               <div className="flex items-center gap-2 mb-4 text-[#E2E8F0]">
                 <Compass className="w-4 h-4" strokeWidth={1.5} />
-                <span className="text-xs font-medium uppercase tracking-wider">Socratic Guidance</span>
+                <span className="text-xs font-medium uppercase tracking-wider">苏格拉底式指引</span>
               </div>
               <div className="grid grid-cols-1 gap-2">
                 {[
