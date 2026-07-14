@@ -822,7 +822,7 @@ Return the result strictly as a JSON object matching the schema. Always put the 
       const existingEdges = analysis?.analysis?.edges || [];
 
       const responseStream = await ai.models.generateContentStream({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3-flash",
         contents: {
           parts: [
             {
